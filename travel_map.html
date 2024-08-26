@@ -4,91 +4,58 @@
 <meta charset="UTF-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GoogleMap現在地表示サンプル</title>
+<title>旅行計画</title>
 <link rel="stylesheet" href="/css/travel.css">
 <script src="js/jquery-2.1.3.min.js"></script>
+<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script> 
 </head>
 
 <body>
 
+    <div class="controls">
+        <input type="text" id="destination-input" placeholder="地名を入力">
+        <button onclick="searchdestination()">検索</button>
+        <button onclick="showattractions()" id="show-attractions" >スポットを表示</button>
+        <button onclick="createschedule()" id="create-schedule" >スケジュール作成</button>
+    </div>
 
-
-<div class="controls">
-    <input type="text" id="destination-input" placeholder="目的地を入力">
-    <button onclick="searchdestination()">検索</button>
-    <button onclick="showattractions()">観光スポットを表示</button>
-    <ul id="destination-list"></ul>
-</div>
 <div class="wrapper">
-    <div id="js-map" class="map"></div>
+    <div id="map"></div>
 </div>
+
+<div id="itinerary" style="display:none;">
+    <h3>旅程表</h3>
+    <ul id="itinerary-list" class="sortable"></ul>
+</div>
+<div id="schedule"></div>
 
 
 <script async
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC_GEWw81WIE94mxkbD0GnlPvh93eayHBE&libraries=places,geometry&callback=initmap">
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC_GEWw81WIE94mxkbD0GnlPvh93eayHBE&libraries=places,geometry&callback=initMap">
 </script>
 
 <script>
 
 // マップオブジェクトとマーカーの配列
 let map;
-let mylocation;
-let destinations = [];
+let service;
+let infowindow;
 let markers = [];
+let attractions = [];
 
 // GoogleMapライブラリを読み込んだ後に実行される初期化関数
-function initmap() {
-    navigator.geolocation.getCurrentPosition(success, error, options);
-}
-
-// 位置情報取得成功時の処理
-function success(pos) {
-    let nowlat = pos.coords.latitude;
-    let nowlng = pos.coords.longitude;
-    let nowlatlng = new google.maps.LatLng(nowlat, nowlng);
-
-    let mapoptions = {
-        zoom: 14,
-        center: nowlatlng
-    };
-
-    map = new google.maps.Map(document.getElementById('js-map'), mapoptions);
-
-    mylocation = new google.maps.Marker({
-        map: map,
-        position: mapoptions.center,
-        icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 22,
-            fillColor: '#fff',
-            fillOpacity: 0.8,
-            strokeColor: "red",
-            strokeWeight: 8,
-        },
-        label: {
-            text: '現在地',
-            color: 'orange',
-            fontSize: '20px',
-            fontWeight: '900'
-        },
-        draggable: false,
-        map: map,
-        animation: google.maps.Animation.DROP
+function initMap() {
+    console.log('Google Maps API loaded');
+    map = new google.maps.Map(document.getElementById('map'), {
+        zoom: 12,center: { lat: 35.6895, lng: 139.6917 }  // 東京をデフォルトの中心に設定
     });
+  
+    service = new google.maps.places.PlacesService(map);
+    infowindow = new google.maps.InfoWindow();
+
 }
 
-// 位置情報取得失敗時の処理
-function error(err) {
-    let msg = 'エラーが発生しました: ' + err;
-    console.log(msg);
-}
 
-// 位置情報取得のオプション
-let options = {
-    enableHighAccuracy: false,
-    timeout: 5000,
-    maximumAge: 0
-};
 
 // 目的地を検索し、マップに表示する関数
 function searchdestination() {
@@ -97,80 +64,176 @@ function searchdestination() {
     
     geocoder.geocode({ address: input }, function(results, status) {
         if (status === 'OK') {
-            const location = results[0].geometry.location;
-            map.setCenter(location);
-            
-            const marker = new google.maps.Marker({
-                map: map,
-                position: location,
-                title: input
-            });
-            
-            destinations.push({ name: input, location: location });
-            markers.push(marker);
-            
-            updatedestinationlist();
+            map.setCenter(results[0].geometry.location);
         } else {
             alert('目的地が見つかりませんでした: ' + status);
         }
     });
 }
 
-// 目的地リストを更新する関数
-function updatedestinationlist() {
-    const list = document.getElementById('destination-list');
-    list.innerHTML = '';
-    destinations.forEach((dest, index) => {
-        const li = document.createElement('li');
-        li.textContent = dest.name;
-        li.onclick = () => map.panTo(dest.location);
-        list.appendChild(li);
-    });
-}
 
 // 観光スポットを表示する関数
 function showattractions() {
-    const service = new google.maps.places.PlacesService(map);
-    destinations.forEach(dest => {
-        const request = {
-            location: dest.location,
-            radius: '5000',
-            type: ['tourist_attraction']
-        };
+    const request = {
+        location: map.getCenter(),
+        radius: '5000',
+        type: ['tourist_attraction']
+    };
 
-        service.nearbySearch(request, (results, status) => {
-            if (status === google.maps.places.PlacesServiceStatus.OK) {
-                for (let i = 0; i < results.length; i++) {
-                    createmarker(results[i]);
-                }
+    service.nearbySearch(request, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+            clearMarkers();
+            attractions = []; // attractions配列をクリア
+            for (let i = 0; i < results.length; i++) {
+                createmarker(results[i]);
+                attractions.push(results[i]);
             }
-        });
+            document.getElementById('create-schedule').style.display = 'inline-block';
+            console.log('Attractions:', attractions); // 追加
+       
+        }
     });
+
 }
+
+
 
 // 観光スポットのマーカーを作成する関数
 function createmarker(place) {
     const marker = new google.maps.Marker({
         map: map,
         position: place.geometry.location,
-        title: place.name,
-        icon: {
-            url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
-        }
+        title: place.name
     });
 
-    const infowindow = new google.maps.InfoWindow({
-        content: `<strong>${place.name}</strong><br>
-                  評価: ${place.rating || 'N/A'}<br>
-                  住所: ${place.vicinity}`
-    });
-
-    marker.addListener('click', () => {
-        infowindow.open(map, marker);
+    google.maps.event.addListener(marker, 'click', function() {
+        infowindow.setContent(place.name);
+        infowindow.open(map, this);
     });
 
     markers.push(marker);
 }
+
+function clearMarkers() {
+    for (let i = 0; i < markers.length; i++) {
+        markers[i].setMap(null);
+    }
+    markers = [];
+    attractions = [];
+}
+
+// 移動時間の計算
+function calculateTravelTimes() {
+    const itineraryItems = document.querySelectorAll('#itinerary-list li');
+    const schedule = document.getElementById('schedule');
+    schedule.innerHTML = '<h3>スケジュール</h3>';
+
+    const scheduleContainer = document.createElement('div');
+    scheduleContainer.className = 'schedule-container';
+    schedule.appendChild(scheduleContainer);
+
+    let promises = [];
+
+    for (let i = 0; i < itineraryItems.length - 1; i++) {
+        const originId = itineraryItems[i].getAttribute('data-id');
+        const destinationId = itineraryItems[i+1].getAttribute('data-id');
+        
+        if (!attractions[originId] || !attractions[destinationId]) {
+            console.error(`Invalid attraction index: origin=${originId}, destination=${destinationId}`);
+            continue;
+        }
+
+        const origin = attractions[originId].geometry.location;
+        const destination = attractions[destinationId].geometry.location;
+
+        promises.push(new Promise((resolve, reject) => {
+            const service = new google.maps.DistanceMatrixService();
+            service.getDistanceMatrix(
+                {
+                    origins: [origin],
+                    destinations: [destination],
+                    travelMode: 'DRIVING',
+                }, (response, status) => {
+                    if (status == 'OK') {
+                        const duration = response.rows[0].elements[0].duration.text;
+                        const distance = response.rows[0].elements[0].distance.text;
+                        resolve({
+                            from: itineraryItems[i].textContent,
+                            to: itineraryItems[i+1].textContent,
+                            duration: duration,
+                            distance: distance
+                        });
+                    } else {
+                        reject(`DistanceMatrix API error: ${status}`);
+                    }
+                });
+        }));
+    }
+
+    Promise.all(promises)
+        .then(results => {
+            results.forEach((result, index) => {
+                // 出発地点
+                const fromDiv = document.createElement('div');
+                fromDiv.className = 'schedule-item';
+                fromDiv.innerHTML = `
+                    <h4>目的地 ${index + 1}: ${result.from}</h4>
+                `;
+                scheduleContainer.appendChild(fromDiv);
+
+                // 移動情報を示す矢印
+                const arrowDiv = document.createElement('div');
+                arrowDiv.className = 'schedule-arrow';
+                arrowDiv.innerHTML = `
+                    ↓<br>
+                    ${result.duration} (${result.distance})
+                `;
+                scheduleContainer.appendChild(arrowDiv);
+
+                // 最後の目的地を追加
+                if (index === results.length - 1) {
+                    const toDiv = document.createElement('div');
+                    toDiv.className = 'schedule-item';
+                    toDiv.innerHTML = `
+                        <h4>目的地 ${index + 2}: ${result.to}</h4>
+                    `;
+                    scheduleContainer.appendChild(toDiv);
+                }
+            });
+        })
+        .catch(error => {
+            console.error('移動時間の計算中にエラーが発生しました:', error);
+            const p = document.createElement('p');
+            p.textContent = '移動時間を計算できませんでした。エラー: ' + error;
+            scheduleContainer.appendChild(p);
+        });
+}
+
+
+// 旅程の作成
+function createschedule() {
+    const itinerary = document.getElementById('itinerary');
+    const itineraryList = document.getElementById('itinerary-list');
+    itineraryList.innerHTML = '';
+    itinerary.style.display = 'block';
+
+    attractions.forEach((attraction, index) => {
+        const li = document.createElement('li');
+        li.textContent = attraction.name;
+        li.setAttribute('data-id', index);
+        itineraryList.appendChild(li);
+    });
+
+    $("#itinerary-list").sortable({
+        update: function(event, ui) {
+            calculateTravelTimes();
+        }
+    });
+
+    calculateTravelTimes();
+}
+
+
 
 
 
